@@ -152,6 +152,9 @@ func (p *Provider) Push(services []string, headers map[string]string, body io.Re
 				}
 				break
 			}
+			// Note: if nn > 0 above, the partial chunk was already sent to the peer
+			// before this error path is reached. The peer will receive partial data
+			// followed by a stream close-with-error.
 			err = fmt.Errorf("failed reading body: %w", err)
 			p.CloseStreamWithError(stream, err)
 			return nil, err
