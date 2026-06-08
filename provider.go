@@ -129,25 +129,35 @@ func (p *Provider) Push(services []string, headers map[string]string, body io.Re
 
 	for {
 		nn, err := body.Read(buf[:ChunkSize])
-		if err != nil && err != io.EOF {
+		if nn > 0 {
+			payload := DataPacket{
+				ID:   stream.ID,
+				Data: buf[:nn],
+			}
+
+			if errSend := p.conn.Send(payload.AppendTo([]byte{OpcodeData})); errSend != nil {
+				errSend = fmt.Errorf("failed writing body chunk as a data packet to peer: %w", errSend)
+				p.CloseStreamWithError(stream, errSend)
+				return nil, errSend
+			}
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				// Send empty data packet to signal EOF to the receiver
+				if errSend := p.conn.Send(DataPacket{ID: stream.ID}.AppendTo([]byte{OpcodeData})); errSend != nil {
+					errSend = fmt.Errorf("failed writing EOF data packet to peer: %w", errSend)
+					p.CloseStreamWithError(stream, errSend)
+					return nil, errSend
+				}
+				break
+			}
+			// Note: if nn > 0 above, the partial chunk was already sent to the peer
+			// before this error path is reached. The peer will receive partial data
+			// followed by a stream close-with-error.
 			err = fmt.Errorf("failed reading body: %w", err)
 			p.CloseStreamWithError(stream, err)
 			return nil, err
-		}
-
-		payload := DataPacket{
-			ID:   stream.ID,
-			Data: buf[:nn],
-		}
-
-		if err := p.conn.Send(payload.AppendTo([]byte{OpcodeData})); err != nil {
-			err = fmt.Errorf("failed writing body chunk as a data packet to peer: %w", err)
-			p.CloseStreamWithError(stream, err)
-			return nil, err
-		}
-
-		if err == io.EOF && nn == 0 {
-			break
 		}
 	}
 
